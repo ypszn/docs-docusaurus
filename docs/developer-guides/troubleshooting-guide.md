@@ -65,7 +65,7 @@ error[E0277]: the trait bound `fluentbase_sdk::SharedAPI` is not implemented
 
 ```toml
 [dependencies]
-fluentbase-sdk = "0.3.6"  # Use the latest compatible version
+fluentbase-sdk = "0.4.3-dev"  # Use the latest compatible version
 ```
 
 **Update Command**:
@@ -136,47 +136,6 @@ remappings = [
 ]
 ```
 
-### gblend Build Issues
-
-#### 1. Docker Not Running
-
-**Problem**: WASM build fails with Docker errors.
-
-```bash
-Error: failed to create container: Error response from daemon
-```
-
-**Solution**: Ensure Docker is running:
-
-```bash
-# Check Docker status
-docker info
-
-# Start Docker (macOS)
-open -a Docker
-
-# Start Docker (Linux)
-sudo systemctl start docker
-```
-
-#### 2. Build Cache Issues
-
-**Problem**: Stale build artifacts causing errors.
-
-**Solution**: Clean and rebuild:
-
-```bash
-# Clean all build artifacts
-gblend clean
-
-# Clean Rust cache
-cd src/your-rust-contract
-cargo clean
-
-# Rebuild
-gblend build
-```
-
 ## Deployment Problems
 
 ### Contract Deployment Failures
@@ -196,7 +155,7 @@ Error: gas required exceeds allowance
 gblend estimate-gas --contract YourContract
 
 # Deploy with higher gas limit
-gblend deploy --gas-limit 5000000
+gblend create --gas-limit 5000000
 ```
 
 **Gas Optimization Tips**:
@@ -218,7 +177,7 @@ gblend config --list
 gblend config --network fluent-testnet
 
 # Verify RPC endpoint
-gblend config --rpc-url https://rpc.dev.gblend.xyz
+gblend config --rpc-url $RPC_URL
 ```
 
 #### 3. Contract Verification Failures
@@ -233,10 +192,16 @@ Error: Contract verification failed
 
 ```bash
 # Verify Solidity contract
-gblend verify --contract YourContract
+gblend verify-contract <address> YourContract \
+    --verifier blockscout \
+    --verifier-url https://testnet.fluentscan.xyz/api/ \
+    --constructor-args <args>
 
 # Verify WASM contract
-gblend verify --wasm --contract YourWasmContract
+gblend verify-contract <address> YourContract.wasm \
+    --wasm \
+    --verifier blockscout \
+    --verifier-url https://testnet.fluentscan.xyz/api/
 ```
 
 **Verification Checklist**:
@@ -276,7 +241,7 @@ fn process_data(&self, data: &[U256]) -> U256 {
 - Minimize string allocations
 - Optimize storage patterns
 
-#### 2. WASM Interface Generation Issues
+<!-- #### 2. WASM Interface Generation Issues
 
 **Problem**: Solidity interface not generated correctly.
 
@@ -299,7 +264,7 @@ impl<SDK: SharedAPI> YourAPI for YourContract<SDK> {
 }
 
 basic_entrypoint!(YourContract);
-```
+``` -->
 
 ## Runtime Errors
 
@@ -361,17 +326,25 @@ fn process_data(&self, amount: U256, addr: Address) -> Bytes {
 
 **Problem**: Data corruption due to storage conflicts.
 
-**Solution**: Use proper storage slot management:
+**Solution**: Use the `solidity_storage!` macro for proper storage management:
 
 ```rust
-// Define storage layout explicitly
-const OWNER_SLOT: U256 = U256::from(0);
-const PAUSED_SLOT: U256 = U256::from(1);
-const BALANCE_SLOT: U256 = U256::from(2);
+use fluentbase_sdk::derive::solidity_storage;
+
+// Define storage layout using the macro
+solidity_storage! {
+    Address Owner;               // Slot 0
+    bool Paused;                 // Slot 1  
+    U256 TotalSupply;            // Slot 2
+    mapping(Address => U256) Balance;  // Slot 3
+}
 
 fn get_owner(&self) -> Address {
-    let owner_data = self.sdk.get_storage(OWNER_SLOT);
-    Address::from_slice(&owner_data.to_be_bytes())
+    Owner::get(&self.sdk)
+}
+
+fn set_owner(&mut self, new_owner: Address) {
+    Owner::set(&mut self.sdk, new_owner);
 }
 ```
 
@@ -379,19 +352,19 @@ fn get_owner(&self) -> Address {
 
 **Problem**: Reading wrong data type from storage.
 
-**Solution**: Ensure consistent storage types:
+**Solution**: Use the generated storage methods for type safety:
 
 ```rust
-// Store and retrieve with same type
+// Store and retrieve with same type using generated methods
 fn set_balance(&mut self, user: Address, amount: U256) {
-    let key = self.get_storage_key(user);
-    self.sdk.set_storage(key, amount);
+    Balance::set(&mut self.sdk, user, amount);
 }
 
 fn get_balance(&self, user: Address) -> U256 {
-    let key = self.get_storage_key(user);
-    self.sdk.get_storage(key)
+    Balance::get(&self.sdk, user)
 }
+
+// The macro ensures type safety - this won't compile if types don't match
 ```
 
 ## Performance Issues
@@ -402,13 +375,20 @@ fn get_balance(&self, user: Address) -> U256 {
 
 **Problem**: Excessive gas usage for storage operations.
 
-**Solution**: Optimize storage patterns:
+**Solution**: Use the `solidity_storage!` macro for optimized storage access:
 
 ```rust
-// Batch storage operations
-fn batch_update(&mut self, updates: Vec<(U256, U256)>) {
-    for (key, value) in updates {
-        self.sdk.set_storage(key, value);
+use fluentbase_sdk::derive::solidity_storage;
+
+solidity_storage! {
+    mapping(Address => U256) Balances;
+    U256 TotalSupply;
+}
+
+// Batch storage operations using generated methods
+fn batch_update(&mut self, updates: Vec<(Address, U256)>) {
+    for (user, amount) in updates {
+        Balances::set(&mut self.sdk, user, amount);
     }
 }
 
@@ -525,14 +505,23 @@ fn transfer(&mut self, to: Address, amount: U256) -> bool {
 
 **Problem**: Uninitialized storage causing unexpected behavior.
 
-**Solution**: Initialize storage properly:
+**Solution**: Initialize storage properly using the `solidity_storage!` macro:
 
 ```rust
+use fluentbase_sdk::derive::solidity_storage;
+
+solidity_storage! {
+    U256 InitialState;    // Slot 0
+    bool Paused;          // Slot 1
+    Address Owner;        // Slot 2
+}
+
 impl<SDK: SharedAPI> YourContract<SDK> {
     fn deploy(&mut self) {
-        // Initialize storage values
-        self.sdk.set_storage(U256::from(0), U256::from(1)); // Initial state
-        self.sdk.set_storage(U256::from(1), U256::zero());  // Paused = false
+        // Initialize storage values using generated methods
+        InitialState::set(&mut self.sdk, U256::from(1));
+        Paused::set(&mut self.sdk, false);
+        Owner::set(&mut self.sdk, self.sdk.context().contract_caller());
     }
 }
 ```
@@ -550,7 +539,7 @@ impl<SDK: SharedAPI> YourContract<SDK> {
 
 1. **Documentation**: Check existing guides first
 2. **GitHub Issues**: Search for similar problems
-3. **Discord Community**: Join the [Fluent Discord](https://discord.com/invite/fluentxyz) #developer-forum
+3. **Discord Community**: Join the [Fluent Discord](https://discord.com/invite/fluentxyz) and get support in the #devs-forum channel
 4. **Example Projects**: Review [GitHub examples](https://github.com/fluentlabs-xyz/examples)
 
 ### How to Ask for Help
@@ -567,4 +556,4 @@ When seeking help, provide:
 
 ---
 
-**Still stuck?** Don't hesitate to reach out to the Fluent community. We're here to help you succeed! 🚀
+**Still stuck?** Don't hesitate to reach out to the Fluent community.

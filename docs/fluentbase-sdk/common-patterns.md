@@ -12,9 +12,9 @@ This guide covers common development patterns, best practices, and real-world ex
 
 Before diving into these patterns, make sure you have:
 
-- Basic understanding of [Rust smart contracts](./smart-contracts/rust.mdx)
-- Familiarity with [Solidity development](./smart-contracts/solidity.mdx)
-- Experience with [blended applications](./building-a-blended-app/README.md)
+- Basic understanding of [Rust smart contracts](/docs/developer-guides/smart-contracts/rust.mdx)
+- Familiarity with [Solidity development](/docs/developer-guides/smart-contracts/solidity.mdx)
+- Experience with [blended applications](/docs/developer-guides/building-a-blended-app/README.md)
 - `gblend` tool installed and configured
 
 :::
@@ -22,9 +22,7 @@ Before diving into these patterns, make sure you have:
 ## Table of Contents
 
 - [Error Handling Patterns](#error-handling-patterns)
-- [Gas Optimization](#gas-optimization)
 - [Security Best Practices](#security-best-practices)
-- [Testing Strategies](#testing-strategies)
 - [Debugging Techniques](#debugging-techniques)
 - [Performance Optimization](#performance-optimization)
 - [Common Anti-Patterns](#common-anti-patterns)
@@ -109,184 +107,6 @@ fn critical_operation(&self, value: U256) -> U256 {
 }
 ```
 
-### Solidity Error Handling
-
-#### 1. Custom Errors (Gas Efficient)
-
-```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
-
-contract ErrorHandlingExample {
-    // Custom errors are more gas efficient than require statements
-    error InsufficientBalance(uint256 available, uint256 required);
-    error InvalidAddress(address provided);
-    error ValueTooHigh(uint256 value, uint256 max);
-    
-    mapping(address => uint256) public balances;
-    
-    function withdraw(uint256 amount) external {
-        uint256 balance = balances[msg.sender];
-        
-        if (balance < amount) {
-            revert InsufficientBalance(balance, amount);
-        }
-        
-        if (amount > 1000 ether) {
-            revert ValueTooHigh(amount, 1000 ether);
-        }
-        
-        balances[msg.sender] = balance - amount;
-        // Transfer logic here
-    }
-    
-    function setBalance(address user, uint256 amount) external {
-        if (user == address(0)) {
-            revert InvalidAddress(user);
-        }
-        
-        balances[user] = amount;
-    }
-}
-```
-
-#### 2. Require Statements with Custom Messages
-
-```solidity
-function transfer(address to, uint256 amount) external {
-    require(to != address(0), "Transfer to zero address");
-    require(amount > 0, "Amount must be greater than zero");
-    require(balances[msg.sender] >= amount, "Insufficient balance");
-    
-    balances[msg.sender] -= amount;
-    balances[to] += amount;
-}
-```
-
-## Gas Optimization
-
-### Rust Contract Optimization
-
-#### 1. Efficient Storage Patterns
-
-```rust
-#[derive(Contract)]
-struct OptimizedStorage<SDK> {
-    sdk: SDK,
-}
-
-pub trait StorageAPI {
-    fn set_value(&mut self, key: U256, value: U256);
-    fn get_value(&self, key: U256) -> U256;
-    fn batch_set(&mut self, keys: Vec<U256>, values: Vec<U256>);
-}
-
-#[router(mode = "solidity")]
-impl<SDK: SharedAPI> StorageAPI for OptimizedStorage<SDK> {
-    
-    #[function_id("setValue(uint256,uint256)")]
-    fn set_value(&mut self, key: U256, value: U256) {
-        // Use efficient storage patterns
-        self.sdk.set_storage(key, value);
-    }
-
-    #[function_id("getValue(uint256)")]
-    fn get_value(&self, key: U256) -> U256 {
-        self.sdk.get_storage(key)
-    }
-
-    #[function_id("batchSet(uint256[],uint256[])")]
-    fn batch_set(&mut self, keys: Vec<U256>, values: Vec<U256>) {
-        // Batch operations reduce gas costs
-        for (key, value) in keys.iter().zip(values.iter()) {
-            self.sdk.set_storage(*key, *value);
-        }
-    }
-}
-
-basic_entrypoint!(OptimizedStorage);
-```
-
-#### 2. Memory Management
-
-```rust
-// Avoid unnecessary allocations
-#[function_id("efficientString()")]
-fn efficient_string(&self) -> String {
-    // Pre-allocate with known size when possible
-    let mut result = String::with_capacity(100);
-    result.push_str("Hello");
-    result.push_str(" World");
-    result
-}
-
-// Use references when possible
-#[function_id("processArray(uint256[])")]
-fn process_array(&self, data: &[U256]) -> U256 {
-    let mut sum = U256::zero();
-    for item in data {
-        sum += *item;
-    }
-    sum
-}
-```
-
-### Solidity Gas Optimization
-
-#### 1. Storage Layout Optimization
-
-```solidity
-contract GasOptimized {
-    // Pack related variables together
-    struct User {
-        uint128 balance;    // 16 bytes
-        uint64 lastUpdate;  // 8 bytes
-        uint64 userId;      // 8 bytes
-        // Total: 32 bytes (one storage slot)
-    }
-    
-    // Use uint256 for single variables to avoid packing overhead
-    uint256 public totalSupply;
-    
-    // Use bytes32 for fixed-size data
-    mapping(address => bytes32) public userData;
-    
-    // Use uint8 for small enums
-    enum Status { Pending, Active, Inactive }
-    mapping(address => Status) public userStatus;
-}
-```
-
-#### 2. Function Optimization
-
-```solidity
-contract OptimizedFunctions {
-    // Use external for functions only called externally
-    function externalFunction() external pure returns (uint256) {
-        return 42;
-    }
-    
-    // Use public for functions that need internal access
-    function publicFunction() public pure returns (uint256) {
-        return externalFunction();
-    }
-    
-    // Avoid unnecessary storage reads
-    function optimizedRead() external view returns (uint256) {
-        // Cache storage reads
-        uint256 value = storageValue;
-        return value + value; // Use cached value twice
-    }
-    
-    // Use unchecked for arithmetic that can't overflow
-    function uncheckedIncrement(uint256 x) external pure returns (uint256) {
-        unchecked {
-            return x + 1;
-        }
-    }
-}
-```
-
 ## Security Best Practices
 
 ### 1. Access Control
@@ -294,6 +114,15 @@ contract OptimizedFunctions {
 #### Rust Implementation
 
 ```rust
+use fluentbase_sdk::derive::solidity_storage;
+
+// Define storage layout
+solidity_storage! {
+    Address Owner;          // Slot 0
+    bool Paused;            // Slot 1
+    bool ReentrancyLock;    // Slot 2
+}
+
 #[derive(Contract)]
 struct SecureContract<SDK> {
     sdk: SDK,
@@ -301,7 +130,7 @@ struct SecureContract<SDK> {
 
 pub trait SecurityAPI {
     fn only_owner_function(&self) -> String;
-    fn pausable_function(&self) -> String;
+e    fn pausable_function(&self) -> String;
     fn reentrancy_protected(&mut self) -> U256;
 }
 
@@ -310,11 +139,11 @@ impl<SDK: SharedAPI> SecurityAPI for SecureContract<SDK> {
     
     #[function_id("onlyOwnerFunction()")]
     fn only_owner_function(&self) -> String {
-        // Check if caller is owner
-        let caller = self.sdk.get_caller();
-        let owner = self.sdk.get_storage(U256::from(0)); // Owner stored at slot 0
+        // Check if caller is owner using proper storage access
+        let caller = self.sdk.context().contract_caller();
+        let owner = Owner::get(&self.sdk);
         
-        if caller != Address::from_slice(&owner.to_be_bytes()) {
+        if caller != owner {
             panic!("Only owner can call this function");
         }
         
@@ -323,10 +152,10 @@ impl<SDK: SharedAPI> SecurityAPI for SecureContract<SDK> {
 
     #[function_id("pausableFunction()")]
     fn pausable_function(&self) -> String {
-        // Check if contract is paused
-        let paused = self.sdk.get_storage(U256::from(1)); // Paused flag at slot 1
+        // Check if contract is paused using proper storage access
+        let paused = Paused::get(&self.sdk);
         
-        if !paused.is_zero() {
+        if paused {
             panic!("Contract is paused");
         }
         
@@ -335,22 +164,21 @@ impl<SDK: SharedAPI> SecurityAPI for SecureContract<SDK> {
 
     #[function_id("reentrancyProtected()")]
     fn reentrancy_protected(&mut self) -> U256 {
-        // Simple reentrancy protection
-        let lock_key = U256::from(2);
-        let lock_value = self.sdk.get_storage(lock_key);
+        // Simple reentrancy protection using proper storage access
+        let lock_value = ReentrancyLock::get(&self.sdk);
         
-        if !lock_value.is_zero() {
+        if lock_value {
             panic!("Reentrancy detected");
         }
         
         // Set lock
-        self.sdk.set_storage(lock_key, U256::from(1));
+        ReentrancyLock::set(&mut self.sdk, true);
         
         // Perform operation
         let result = U256::from(42);
         
         // Clear lock
-        self.sdk.set_storage(lock_key, U256::zero());
+        ReentrancyLock::set(&mut self.sdk, false);
         
         result
     }
@@ -414,7 +242,7 @@ fn validate_inputs(&self, amount: U256, recipient: Address, data: Bytes) -> bool
 }
 ```
 
-## Testing Strategies
+<!-- ## Testing Strategies
 
 ### 1. Unit Testing in Rust
 
@@ -490,7 +318,7 @@ contract YourContractTest is Test {
         assertLt(gasUsed, 100000);
     }
 }
-```
+``` -->
 
 ## Debugging Techniques
 
@@ -566,11 +394,16 @@ fn batch_process(&self, items: Vec<U256>) -> Vec<U256> {
 ### 2. Caching Strategies
 
 ```rust
+use fluentbase_sdk::derive::solidity_storage;
+
+solidity_storage! {
+    mapping(U256 => U256) Cache;
+}
+
 #[function_id("cachedComputation(uint256)")]
 fn cached_computation(&self, input: U256) -> U256 {
     // Check cache first
-    let cache_key = input;
-    let cached_result = self.sdk.get_storage(cache_key);
+    let cached_result = Cache::get(&self.sdk, input);
     
     if !cached_result.is_zero() {
         return cached_result;
@@ -580,7 +413,7 @@ fn cached_computation(&self, input: U256) -> U256 {
     let result = expensive_computation(input);
     
     // Cache result (in real implementation, you'd want to limit cache size)
-    self.sdk.set_storage(cache_key, result);
+    Cache::set(&mut self.sdk, input, result);
     
     result
 }
@@ -677,15 +510,14 @@ Now that you understand these patterns and best practices, you can:
 5. **Monitor gas usage** and optimize performance
 
 For more advanced topics, explore:
-- [Rust Smart Contracts](./smart-contracts/rust.mdx)
-- [Solidity Development](./smart-contracts/solidity.mdx)
-- [Building Blended Apps](./building-a-blended-app/README.md)
+- [Rust Smart Contracts](/docs/developer-guides/smart-contracts/rust.mdx)
+- [Solidity Development](/docs/developer-guides/smart-contracts/solidity.mdx)
+- [Building Blended Apps](/docs/developer-guides/building-a-blended-app/README.md)
 
 :::tip[Community Resources]
 
 Join the Fluent community for more tips and best practices:
 - [Discord Developer Forum](https://discord.com/invite/fluentxyz)
-- [GitHub Discussions](https://github.com/fluentlabs-xyz/docs-docusaurus/discussions)
 - [Example Projects](https://github.com/fluentlabs-xyz/examples)
 
 :::
